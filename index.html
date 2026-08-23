@@ -13,6 +13,7 @@
     #reader { width: 100%; max-width: 350px; margin: 0 auto 15px auto; }
     input, select, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
     button { background: #2563eb; color: #fff; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
     #status { margin-top: 10px; font-weight: bold; }
   </style>
 </head>
@@ -29,7 +30,7 @@
     <h2>Ware Buchen (EK / VK)</h2>
     <div id="reader"></div>
 
-    <form id="bookingForm" onsubmit="submitBooking(event)">
+    <form id="bookingForm" onsubmit="confirmAndSubmit(event)">
       <input type="text" id="barcode" placeholder="Barcode" required autofocus>
       <input type="text" id="name" placeholder="Warenname (optional)">
       <input type="text" id="platz" placeholder="Lagerplatz (z.B. A1)" required>
@@ -42,7 +43,7 @@
       <input type="number" id="menge" placeholder="Menge" value="1" min="1" required>
       <input type="number" step="0.01" id="preis" placeholder="Einzelpreis (€)" required>
 
-      <button type="submit">Buchung Ausführen</button>
+      <button type="submit" id="submitBtn">Buchung Ausführen</button>
     </form>
 
     <div id="status"></div>
@@ -50,11 +51,16 @@
 
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
+    let isProcessing = false;
 
+    // Kamera-Scan mit Bestätigungsabfrage
     const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
     scanner.render((text) => {
-      document.getElementById('barcode').value = text;
-      fetchArticleInfo(text);
+      let isCorrect = confirm(`Gescannter Barcode: ${text}\n\nIst dieser Barcode korrekt?`);
+      if (isCorrect) {
+        document.getElementById('barcode').value = text;
+        fetchArticleInfo(text);
+      }
     });
 
     document.getElementById('barcode').addEventListener('change', (e) => {
@@ -84,9 +90,38 @@
       if (typ === "VK" && info.vk_preis) document.getElementById('preis').value = info.vk_preis;
     }
 
-    async function submitBooking(e) {
+    // Bestätigungsabfrage vor dem Absenden + Schutz vor Mehrfach-Klicks
+    function confirmAndSubmit(e) {
       e.preventDefault();
+      if (isProcessing) return;
+      
+      let barcode = document.getElementById('barcode').value.trim();
+      let name = document.getElementById('name').value.trim() || "Unbekannt";
+      let platz = document.getElementById('platz').value.trim();
+      let typ = document.getElementById('typ').value;
+      let menge = document.getElementById('menge').value;
+      let preis = document.getElementById('preis').value;
+
+      let msg = `Bitte finale Buchung überprüfen:\n\n` +
+                `Typ: ${typ === "EK" ? "Wareneinkauf (EK)" : "Warenverkauf (VK)"}\n` +
+                `Artikel: ${name} (${barcode})\n` +
+                `Lagerplatz: ${platz}\n` +
+                `Menge: ${menge} Stück\n` +
+                `Einzelpreis: ${preis} €\n` +
+                `Gesamtwert: ${(menge * preis).toFixed(2)} €\n\n` +
+                `Jetzt verbindlich buchen?`;
+
+      if (confirm(msg)) {
+        submitBooking();
+      }
+    }
+
+    async function submitBooking() {
+      isProcessing = true;
+      let btn = document.getElementById('submitBtn');
       let status = document.getElementById('status');
+      
+      btn.disabled = true;
       status.innerText = "Sende Buchung...";
 
       let payload = {
@@ -113,6 +148,9 @@
         }
       } catch (err) {
         status.innerText = "❌ Verbindungsfehler!";
+      } finally {
+        isProcessing = false;
+        btn.disabled = false;
       }
     }
   </script>
