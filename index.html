@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lager Beta - Buchen</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { font-family: sans-serif; margin: 15px; background: #f4f6f8; }
+    nav { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+    nav a { text-decoration: none; color: #2563eb; font-weight: bold; }
+    .card { background: #fff; padding: 15px; border-radius: 6px; }
+    #reader { width: 100%; max-width: 350px; margin: 0 auto 15px auto; }
+    input, select, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
+    button { background: #2563eb; color: #fff; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; }
+    #status { margin-top: 10px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Buchen (EK/VK)</a> |
+    <a href="artikel.html">Artikel & Druck</a> |
+    <a href="platz.html">Platzabfrage</a> |
+    <a href="bilanz.html">Bilanz</a> |
+    <a href="verwaltung.html">Verwaltung</a>
+  </nav>
+
+  <div class="card">
+    <h2>Ware Buchen (EK / VK)</h2>
+    <div id="reader"></div>
+
+    <form id="bookingForm" onsubmit="submitBooking(event)">
+      <input type="text" id="barcode" placeholder="Barcode" required autofocus>
+      <input type="text" id="name" placeholder="Warenname (optional)">
+      <input type="text" id="platz" placeholder="Lagerplatz (z.B. A1)" required>
+      
+      <select id="typ">
+        <option value="EK">Wareneinkauf (EK)</option>
+        <option value="VK">Warenverkauf (VK)</option>
+      </select>
+
+      <input type="number" id="menge" placeholder="Menge" value="1" min="1" required>
+      <input type="number" step="0.01" id="preis" placeholder="Einzelpreis (€)" required>
+
+      <button type="submit">Buchung Ausführen</button>
+    </form>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
+
+    const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
+    scanner.render((text) => {
+      document.getElementById('barcode').value = text;
+      fetchArticleInfo(text);
+    });
+
+    document.getElementById('barcode').addEventListener('change', (e) => {
+      fetchArticleInfo(e.target.value.trim());
+    });
+
+    async function fetchArticleInfo(code) {
+      if (!code) return;
+      try {
+        let res = await fetch(`${API_URL}?action=getArticle&barcode=${encodeURIComponent(code)}`);
+        let data = await res.json();
+        if (data.info && data.info.name !== "Unbekannt") {
+          document.getElementById('name').value = data.info.name;
+          updatePriceByTyp(data.info);
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('typ').addEventListener('change', () => {
+      let code = document.getElementById('barcode').value.trim();
+      if (code) fetchArticleInfo(code);
+    });
+
+    function updatePriceByTyp(info) {
+      let typ = document.getElementById('typ').value;
+      if (typ === "EK" && info.ek_preis) document.getElementById('preis').value = info.ek_preis;
+      if (typ === "VK" && info.vk_preis) document.getElementById('preis').value = info.vk_preis;
+    }
+
+    async function submitBooking(e) {
+      e.preventDefault();
+      let status = document.getElementById('status');
+      status.innerText = "Sende Buchung...";
+
+      let payload = {
+        action: "postBooking",
+        barcode: document.getElementById('barcode').value.trim(),
+        name: document.getElementById('name').value.trim(),
+        platz: document.getElementById('platz').value.trim(),
+        typ: document.getElementById('typ').value,
+        menge: document.getElementById('menge').value,
+        preis: document.getElementById('preis').value
+      };
+
+      try {
+        let res = await fetch(API_URL, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        let result = await res.json();
+        if (result.status === "success") {
+          status.innerText = "✅ Gebucht! ID: " + result.data.id;
+          document.getElementById('bookingForm').reset();
+        } else {
+          status.innerText = "❌ Fehler: " + result.message;
+        }
+      } catch (err) {
+        status.innerText = "❌ Verbindungsfehler!";
+      }
+    }
+  </script>
+</body>
+</html>
