@@ -112,11 +112,12 @@
       fetchArticleInfo(e.target.value.trim());
     });
 
-    // --- REINES FRONTEND-FETCH MIT MULTI-API FALLBACK ---
+    // --- REINES FRONTEND-FETCH MIT NAME & PREIS-VORSCHLAG ---
     async function fetchArticleInfo(code) {
       if (!code) return;
 
       let nameInput = document.getElementById('name');
+      let preisInput = document.getElementById('preis');
       let status = document.getElementById('status');
 
       // 1. EIGENES BACKEND (Google Sheet)
@@ -145,7 +146,14 @@
           let prodName = extData.product.product_name_de || extData.product.product_name || "";
           if (prodName) {
             nameInput.value = prodName;
-            status.innerText = "🌐 Produktname gefunden (Open Food Facts)!";
+            
+            // Preisvorschlag abfangen (falls vorhanden)
+            if (extData.product.price) {
+              preisInput.value = Number(extData.product.price).toFixed(2);
+              status.innerText = "🌐 Produktname & Preisvorschlag übernommen (Open Food Facts)!";
+            } else {
+              status.innerText = "🌐 Produktname gefunden (Open Food Facts)!";
+            }
             return;
           }
         }
@@ -162,7 +170,13 @@
           let prodName = extData2.product.product_name_de || extData2.product.product_name || "";
           if (prodName) {
             nameInput.value = prodName;
-            status.innerText = "🌐 Produktname gefunden (Open Products Facts)!";
+            
+            if (extData2.product.price) {
+              preisInput.value = Number(extData2.product.price).toFixed(2);
+              status.innerText = "🌐 Produktname & Preisvorschlag übernommen (Open Products Facts)!";
+            } else {
+              status.innerText = "🌐 Produktname gefunden (Open Products Facts)!";
+            }
             return;
           }
         }
@@ -176,10 +190,19 @@
         let extData3 = await extRes3.json();
 
         if (extData3.items && extData3.items.length > 0) {
-          let prodName = extData3.items[0].title;
+          let item = extData3.items[0];
+          let prodName = item.title;
           if (prodName) {
             nameInput.value = prodName;
-            status.innerText = "🌐 Produktname gefunden (UpcItemDB)!";
+
+            // UpcItemDB liefert häufig 'lowest_recorded_price' oder 'price'
+            let suggestedPrice = item.lowest_recorded_price || item.price || 0;
+            if (suggestedPrice > 0) {
+              preisInput.value = Number(suggestedPrice).toFixed(2);
+              status.innerText = "🌐 Produktname & Richtpreis übernommen (UpcItemDB)!";
+            } else {
+              status.innerText = "🌐 Produktname gefunden (UpcItemDB)!";
+            }
             return;
           }
         }
@@ -188,7 +211,7 @@
       }
 
       // Wenn keine Quelle etwas gefunden hat:
-      status.innerText = "⚠️ Produkt in keiner externen Datenbank gefunden. Bitte Name manuell eingeben.";
+      status.innerText = "⚠️ Produkt in keiner externen Datenbank gefunden. Bitte Name und Preis manuell eingeben.";
     }
 
     document.getElementById('typ').addEventListener('change', () => {
