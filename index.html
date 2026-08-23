@@ -19,6 +19,19 @@
     button:disabled { background: #94a3b8; cursor: not-allowed; }
     .btn-pdf { background: #059669; margin-top: 10px; }
     #status { margin-top: 10px; font-weight: bold; }
+    
+    /* Stil für das Target-Auswahlfeld */
+    .scan-target-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+    }
+    .scan-target-box label { font-weight: bold; cursor: pointer; color: #1e40af; }
   </style>
 </head>
 <body>
@@ -32,6 +45,14 @@
 
   <div class="card">
     <h2>Ware Buchen (EK / VK)</h2>
+
+    <!-- Ziel des nächsten Scans auswählen -->
+    <div class="scan-target-box">
+      <span>Ziel für Scan:</span>
+      <label><input type="radio" name="scanTarget" value="barcode" checked> 📦 Artikel-Barcode</label>
+      <label><input type="radio" name="scanTarget" value="platz"> 📍 Lagerplatz</label>
+    </div>
+
     <div id="reader"></div>
 
     <form id="bookingForm" onsubmit="confirmAndSubmit(event)">
@@ -59,15 +80,36 @@
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
     let isProcessing = false;
-    let lastBookingData = null; // Speichert Daten des letzten Verkaufs für PDF-Erstellung
+    let lastBookingData = null;
 
     const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
+    
     scanner.render((text) => {
-      let isCorrect = confirm(`Gescannter Barcode: ${text}\n\nIst dieser Barcode korrekt?`);
+      // Prüfen, welches Feld aktuell als Scan-Ziel ausgewählt ist
+      let scanTarget = document.querySelector('input[name="scanTarget"]:checked').value;
+      let targetLabel = scanTarget === 'barcode' ? 'Artikel-Barcode' : 'Lagerplatz';
+
+      let isCorrect = confirm(`Gescannter Code: ${text}\nAls ${targetLabel} eintragen?`);
       if (isCorrect) {
-        document.getElementById('barcode').value = text;
-        fetchArticleInfo(text);
+        if (scanTarget === 'barcode') {
+          document.getElementById('barcode').value = text;
+          fetchArticleInfo(text);
+          // Automatisch auf 'platz' umstellen für den nächsten Scan
+          document.querySelector('input[name="scanTarget"][value="platz"]').checked = true;
+        } else {
+          document.getElementById('platz').value = text;
+          // Nach Lagerplatz-Scan wieder auf 'barcode' zurückstellen
+          document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
+        }
       }
+    });
+
+    // Manuelle Eingabe-/Fokus-Interaktion: Radio-Button anpassen, wenn der Nutzer in ein Input tippt
+    document.getElementById('barcode').addEventListener('focus', () => {
+      document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
+    });
+    document.getElementById('platz').addEventListener('focus', () => {
+      document.querySelector('input[name="scanTarget"][value="platz"]').checked = true;
     });
 
     document.getElementById('barcode').addEventListener('change', (e) => {
@@ -150,7 +192,6 @@
         if (result.status === "success") {
           status.innerText = "✅ Gebucht! ID: " + result.data.id;
           
-          // Wenn es ein VERKAUF (VK) war, PDF-Rechnungsbutton vorbereiten
           if (typ === "VK") {
             lastBookingData = {
               id: result.data.id,
@@ -166,6 +207,8 @@
           }
 
           document.getElementById('bookingForm').reset();
+          // Nach dem Reset standardmäßig wieder auf Barcode stellen
+          document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
         } else {
           status.innerText = "❌ Fehler: " + result.message;
         }
@@ -183,7 +226,6 @@
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
 
-      // Kopfzeile / Firmen-Header
       doc.setFontSize(20);
       doc.setFont("helvetica", "bold");
       doc.text("RECHNUNG / QUITTUNG", 14, 20);
@@ -193,7 +235,6 @@
       doc.text(`Beleg-Nr.: ${lastBookingData.id}`, 14, 30);
       doc.text(`Datum: ${lastBookingData.date} - ${lastBookingData.time}`, 14, 35);
 
-      // Tabelle generieren mit AutoTable
       doc.autoTable({
         startY: 45,
         head: [['Pos.', 'Barcode', 'Artikelbeschreibung', 'Menge', 'Einzelpreis', 'Gesamt']],
@@ -211,7 +252,6 @@
         headStyles: { fillColor: [37, 99, 235] }
       });
 
-      // Summenblock
       let finalY = doc.lastAutoTable.finalY + 10;
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
@@ -221,7 +261,6 @@
       doc.setFont("helvetica", "italic");
       doc.text("Vielen Dank für Ihren Einkauf!", 14, finalY + 15);
 
-      // Speichern
       doc.save(`Rechnung_${lastBookingData.id}.pdf`);
     }
   </script>
