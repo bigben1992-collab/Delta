@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lager Beta - Buchen</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- jsPDF & AutoTable für den Rechnungsdruck -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
   <style>
     body { font-family: sans-serif; margin: 15px; background: #f4f6f8; }
     nav { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
@@ -14,6 +17,7 @@
     input, select, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
     button { background: #2563eb; color: #fff; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; }
     button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-pdf { background: #059669; margin-top: 10px; }
     #status { margin-top: 10px; font-weight: bold; }
   </style>
 </head>
@@ -47,13 +51,16 @@
     </form>
 
     <div id="status"></div>
+    <div id="invoiceArea" style="display: none;">
+      <button class="btn-pdf" onclick="generateInvoicePDF()">📄 Rechnung / Quittung als PDF herunterladen</button>
+    </div>
   </div>
 
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
     let isProcessing = false;
+    let lastBookingData = null; // Speichert Daten des letzten Verkaufs für PDF-Erstellung
 
-    // Kamera-Scan mit Bestätigungsabfrage
     const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
     scanner.render((text) => {
       let isCorrect = confirm(`Gescannter Barcode: ${text}\n\nIst dieser Barcode korrekt?`);
@@ -90,7 +97,6 @@
       if (typ === "VK" && info.vk_preis) document.getElementById('preis').value = info.vk_preis;
     }
 
-    // Bestätigungsabfrage vor dem Absenden + Schutz vor Mehrfach-Klicks
     function confirmAndSubmit(e) {
       e.preventDefault();
       if (isProcessing) return;
@@ -120,19 +126,19 @@
       isProcessing = true;
       let btn = document.getElementById('submitBtn');
       let status = document.getElementById('status');
+      document.getElementById('invoiceArea').style.display = "none";
       
       btn.disabled = true;
       status.innerText = "Sende Buchung...";
 
-      let payload = {
-        action: "postBooking",
-        barcode: document.getElementById('barcode').value.trim(),
-        name: document.getElementById('name').value.trim(),
-        platz: document.getElementById('platz').value.trim(),
-        typ: document.getElementById('typ').value,
-        menge: document.getElementById('menge').value,
-        preis: document.getElementById('preis').value
-      };
+      let barcode = document.getElementById('barcode').value.trim();
+      let name = document.getElementById('name').value.trim() || "Unbekannt";
+      let platz = document.getElementById('platz').value.trim();
+      let typ = document.getElementById('typ').value;
+      let menge = document.getElementById('menge').value;
+      let preis = document.getElementById('preis').value;
+
+      let payload = { action: "postBooking", barcode, name, platz, typ, menge, preis };
 
       try {
         let res = await fetch(API_URL, {
@@ -140,8 +146,25 @@
           body: JSON.stringify(payload)
         });
         let result = await res.json();
+
         if (result.status === "success") {
           status.innerText = "✅ Gebucht! ID: " + result.data.id;
+          
+          // Wenn es ein VERKAUF (VK) war, PDF-Rechnungsbutton vorbereiten
+          if (typ === "VK") {
+            lastBookingData = {
+              id: result.data.id,
+              date: new Date().toLocaleDateString('de-DE'),
+              time: new Date().toLocaleTimeString('de-DE'),
+              barcode: barcode,
+              name: name,
+              menge: Number(menge),
+              preis: Number(preis),
+              gesamt: (Number(menge) * Number(preis)).toFixed(2)
+            };
+            document.getElementById('invoiceArea').style.display = "block";
+          }
+
           document.getElementById('bookingForm').reset();
         } else {
           status.innerText = "❌ Fehler: " + result.message;
@@ -152,6 +175,54 @@
         isProcessing = false;
         btn.disabled = false;
       }
+    }
+
+    function generateInvoicePDF() {
+      if (!lastBookingData) return;
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      // Kopfzeile / Firmen-Header
+      doc.setFontSize(20);
+      doc.setFont("helvetica", "bold");
+      doc.text("RECHNUNG / QUITTUNG", 14, 20);
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Beleg-Nr.: ${lastBookingData.id}`, 14, 30);
+      doc.text(`Datum: ${lastBookingData.date} - ${lastBookingData.time}`, 14, 35);
+
+      // Tabelle generieren mit AutoTable
+      doc.autoTable({
+        startY: 45,
+        head: [['Pos.', 'Barcode', 'Artikelbeschreibung', 'Menge', 'Einzelpreis', 'Gesamt']],
+        body: [
+          [
+            '1',
+            lastBookingData.barcode,
+            lastBookingData.name,
+            `${lastBookingData.menge} Stk.`,
+            `${lastBookingData.preis.toFixed(2)} €`,
+            `${lastBookingData.gesamt} €`
+          ]
+        ],
+        theme: 'striped',
+        headStyles: { fillColor: [37, 99, 235] }
+      });
+
+      // Summenblock
+      let finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Gesamtbetrag: ${lastBookingData.gesamt} EUR`, 140, finalY);
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "italic");
+      doc.text("Vielen Dank für Ihren Einkauf!", 14, finalY + 15);
+
+      // Speichern
+      doc.save(`Rechnung_${lastBookingData.id}.pdf`);
     }
   </script>
 </body>
