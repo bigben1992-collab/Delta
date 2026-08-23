@@ -85,7 +85,6 @@
     const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
     
     scanner.render((text) => {
-      // Prüfen, welches Feld aktuell als Scan-Ziel ausgewählt ist
       let scanTarget = document.querySelector('input[name="scanTarget"]:checked').value;
       let targetLabel = scanTarget === 'barcode' ? 'Artikel-Barcode' : 'Lagerplatz';
 
@@ -94,17 +93,14 @@
         if (scanTarget === 'barcode') {
           document.getElementById('barcode').value = text;
           fetchArticleInfo(text);
-          // Automatisch auf 'platz' umstellen für den nächsten Scan
           document.querySelector('input[name="scanTarget"][value="platz"]').checked = true;
         } else {
           document.getElementById('platz').value = text;
-          // Nach Lagerplatz-Scan wieder auf 'barcode' zurückstellen
           document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
         }
       }
     });
 
-    // Manuelle Eingabe-/Fokus-Interaktion: Radio-Button anpassen, wenn der Nutzer in ein Input tippt
     document.getElementById('barcode').addEventListener('focus', () => {
       document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
     });
@@ -116,16 +112,48 @@
       fetchArticleInfo(e.target.value.trim());
     });
 
+    // --- REINES FRONTEND-FETCH FÜR EXTERNE STAMMDATEN ---
     async function fetchArticleInfo(code) {
       if (!code) return;
+
+      let nameInput = document.getElementById('name');
+      let status = document.getElementById('status');
+
+      // 1. Zuerst im eigenen Backend / Google Sheet suchen
       try {
         let res = await fetch(`${API_URL}?action=getArticle&barcode=${encodeURIComponent(code)}`);
         let data = await res.json();
-        if (data.info && data.info.name !== "Unbekannt") {
-          document.getElementById('name').value = data.info.name;
+        
+        if (data.info && data.info.name && data.info.name !== "Unbekannt") {
+          nameInput.value = data.info.name;
           updatePriceByTyp(data.info);
+          status.innerText = "";
+          return; // Artikel im eigenen Bestand gefunden -> Abbrechen
         }
-      } catch (e) {}
+      } catch (e) {
+        console.log("Eigenes Backend konnte nicht abgefragt werden:", e);
+      }
+
+      // 2. Falls im eigenen Bestand UNBEKANNT -> Externe EAN-API (Open Food Facts) abfragen
+      status.innerText = "🔍 Suche Produktname in externer EAN-Datenbank...";
+      try {
+        let extRes = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
+        let extData = await extRes.json();
+
+        if (extData.status === 1 && extData.product) {
+          // Deutschen Namen bevorzugen, sonst Fallback auf allgemeinen Produktnamen
+          let prodName = extData.product.product_name_de || extData.product.product_name || "";
+          if (prodName) {
+            nameInput.value = prodName;
+            status.innerText = "🌐 Produktname aus externer Datenbank übernommen!";
+            return;
+          }
+        }
+        status.innerText = "⚠️ Produktname nicht in externer Datenbank gefunden.";
+      } catch (e) {
+        console.log("Fehler bei externer EAN-Abfrage:", e);
+        status.innerText = "";
+      }
     }
 
     document.getElementById('typ').addEventListener('change', () => {
@@ -207,7 +235,6 @@
           }
 
           document.getElementById('bookingForm').reset();
-          // Nach dem Reset standardmäßig wieder auf Barcode stellen
           document.querySelector('input[name="scanTarget"][value="barcode"]').checked = true;
         } else {
           status.innerText = "❌ Fehler: " + result.message;
