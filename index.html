@@ -112,14 +112,14 @@
       fetchArticleInfo(e.target.value.trim());
     });
 
-    // --- REINES FRONTEND-FETCH FÜR EXTERNE STAMMDATEN ---
+    // --- REINES FRONTEND-FETCH MIT MULTI-API FALLBACK ---
     async function fetchArticleInfo(code) {
       if (!code) return;
 
       let nameInput = document.getElementById('name');
       let status = document.getElementById('status');
 
-      // 1. Zuerst im eigenen Backend / Google Sheet suchen
+      // 1. EIGENES BACKEND (Google Sheet)
       try {
         let res = await fetch(`${API_URL}?action=getArticle&barcode=${encodeURIComponent(code)}`);
         let data = await res.json();
@@ -128,32 +128,67 @@
           nameInput.value = data.info.name;
           updatePriceByTyp(data.info);
           status.innerText = "";
-          return; // Artikel im eigenen Bestand gefunden -> Abbrechen
+          return; // Im eigenen Bestand gefunden -> Abbrechen
         }
       } catch (e) {
-        console.log("Eigenes Backend konnte nicht abgefragt werden:", e);
+        console.log("Fehler bei eigener Backend-Abfrage:", e);
       }
 
-      // 2. Falls im eigenen Bestand UNBEKANNT -> Externe EAN-API (Open Food Facts) abfragen
-      status.innerText = "🔍 Suche Produktname in externer EAN-Datenbank...";
+      status.innerText = "🔍 Durchsuche externe EAN-Datenbanken...";
+
+      // 2. FALLBACK A: Open Food Facts (Lebensmittel / Supermarkt)
       try {
         let extRes = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
         let extData = await extRes.json();
 
         if (extData.status === 1 && extData.product) {
-          // Deutschen Namen bevorzugen, sonst Fallback auf allgemeinen Produktnamen
           let prodName = extData.product.product_name_de || extData.product.product_name || "";
           if (prodName) {
             nameInput.value = prodName;
-            status.innerText = "🌐 Produktname aus externer Datenbank übernommen!";
+            status.innerText = "🌐 Produktname gefunden (Open Food Facts)!";
             return;
           }
         }
-        status.innerText = "⚠️ Produktname nicht in externer Datenbank gefunden.";
       } catch (e) {
-        console.log("Fehler bei externer EAN-Abfrage:", e);
-        status.innerText = "";
+        console.log("Open Food Facts nicht erreichbar:", e);
       }
+
+      // 3. FALLBACK B: Open Products Facts (Nicht-Lebensmittel / Werkzeug / Technik)
+      try {
+        let extRes2 = await fetch(`https://world.openproductsfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
+        let extData2 = await extRes2.json();
+
+        if (extData2.status === 1 && extData2.product) {
+          let prodName = extData2.product.product_name_de || extData2.product.product_name || "";
+          if (prodName) {
+            nameInput.value = prodName;
+            status.innerText = "🌐 Produktname gefunden (Open Products Facts)!";
+            return;
+          }
+        }
+      } catch (e) {
+        console.log("Open Products Facts nicht erreichbar:", e);
+      }
+
+      // 4. FALLBACK C: UpcItemDB (Allgemeines Handelsregister)
+      try {
+        let extRes3 = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`);
+        let extData3 = await extRes3.json();
+
+        if (extData3.items && extData3.items.length > 0) {
+          let prodName = extData3.items[0].title;
+          if (prodName) {
+            nameInput.value = prodName;
+            status.innerText = "🌐 Produktname gefunden (UpcItemDB)!";
+            return;
+          }
+        }
+      } catch (e) {
+        console.log("UpcItemDB nicht erreichbar:", e);
+      }
+
+      // Wenn keine Quelle etwas gefunden hat:
+      status.innerText = "⚠️ Produkt in keiner externen Datenbank gefunden. Bitte Name manuell eingeben.";
     }
 
     document.getElementById('typ').addEventListener('change', () => {
