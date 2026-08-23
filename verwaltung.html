@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lager Beta - Verwaltung</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
     body { font-family: sans-serif; margin: 15px; background: #f4f6f8; }
     nav { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
@@ -14,6 +15,7 @@
     .btn-warn { background: #d97706; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
     label { font-size: 13px; font-weight: bold; color: #475569; display: block; margin-top: 5px; }
+    .reader-box { width: 100%; max-width: 300px; margin: 0 auto 10px auto; }
   </style>
 </head>
 <body>
@@ -29,7 +31,8 @@
     <!-- Stammdaten & Preise anpassen (Passiv) -->
     <div class="card">
       <h3>Preise anpassen (Passiv)</h3>
-      <input type="text" id="pBarcode" placeholder="Barcode eingeben">
+      <div id="readerPrice" class="reader-box"></div>
+      <input type="text" id="pBarcode" placeholder="Barcode scannen / eingeben">
       <button onclick="loadArticlePrices()">Artikel Laden</button>
       
       <div id="priceForm" style="display:none; margin-top:10px;">
@@ -45,7 +48,8 @@
     <!-- Interne Umlagerung -->
     <div class="card">
       <h3>Umlagerung (Intern)</h3>
-      <input type="text" id="uBarcode" placeholder="Barcode">
+      <div id="readerRelocate" class="reader-box"></div>
+      <input type="text" id="uBarcode" placeholder="Barcode scannen / eingeben">
       <input type="text" id="uVon" placeholder="Von Platz (z.B. A1)">
       <input type="text" id="uNach" placeholder="Nach Platz (z.B. B2)">
       <input type="number" id="uMenge" placeholder="Menge" value="1" min="1">
@@ -56,6 +60,19 @@
 
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
+
+    // Scanner 1: Preise
+    const scannerPrice = new Html5QrcodeScanner("readerPrice", { fps: 10, qrbox: 180 });
+    scannerPrice.render((text) => {
+      document.getElementById('pBarcode').value = text;
+      loadArticlePrices();
+    });
+
+    // Scanner 2: Umlagerung
+    const scannerRelocate = new Html5QrcodeScanner("readerRelocate", { fps: 10, qrbox: 180 });
+    scannerRelocate.render((text) => {
+      document.getElementById('uBarcode').value = text;
+    });
 
     async function loadArticlePrices() {
       let code = document.getElementById('pBarcode').value.trim();
@@ -127,7 +144,7 @@
           status.innerText = "❌ Fehler: " + data.message;
         }
       } catch (err) {
-        status.innerText = "❌ Fehler bei der Umbuchen!";
+        status.innerText = "❌ Fehler bei der Umbuchung!";
       }
     }
   </script>
