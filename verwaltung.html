@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lager Beta - Verwaltung</title>
+  <style>
+    body { font-family: sans-serif; margin: 15px; background: #f4f6f8; }
+    nav { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+    nav a { text-decoration: none; color: #2563eb; font-weight: bold; }
+    .card { background: #fff; padding: 15px; border-radius: 6px; margin-bottom: 15px; }
+    input, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
+    button { background: #2563eb; color: #fff; border: none; font-weight: bold; border-radius: 4px; cursor: pointer; }
+    .btn-warn { background: #d97706; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
+    label { font-size: 13px; font-weight: bold; color: #475569; display: block; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Buchen (EK/VK)</a> |
+    <a href="artikel.html">Artikel & Druck</a> |
+    <a href="platz.html">Platzabfrage</a> |
+    <a href="bilanz.html">Bilanz</a> |
+    <a href="verwaltung.html">Verwaltung</a>
+  </nav>
+
+  <div class="grid">
+    <!-- Stammdaten & Preise anpassen (Passiv) -->
+    <div class="card">
+      <h3>Preise anpassen (Passiv)</h3>
+      <input type="text" id="pBarcode" placeholder="Barcode eingeben">
+      <button onclick="loadArticlePrices()">Artikel Laden</button>
+      
+      <div id="priceForm" style="display:none; margin-top:10px;">
+        <label>EK-Preis (€):</label>
+        <input type="number" step="0.01" id="pEk">
+        <label>VK-Preis (€):</label>
+        <input type="number" step="0.01" id="pVk">
+        <button class="btn-warn" onclick="savePrices()">Preise Aktualisieren</button>
+      </div>
+      <p id="pStatus"></p>
+    </div>
+
+    <!-- Interne Umlagerung -->
+    <div class="card">
+      <h3>Umlagerung (Intern)</h3>
+      <input type="text" id="uBarcode" placeholder="Barcode">
+      <input type="text" id="uVon" placeholder="Von Platz (z.B. A1)">
+      <input type="text" id="uNach" placeholder="Nach Platz (z.B. B2)">
+      <input type="number" id="uMenge" placeholder="Menge" value="1" min="1">
+      <button onclick="executeRelocation()">Umlagern</button>
+      <p id="uStatus"></p>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
+
+    async function loadArticlePrices() {
+      let code = document.getElementById('pBarcode').value.trim();
+      let status = document.getElementById('pStatus');
+      if (!code) return;
+      
+      status.innerText = "Lade Artikel...";
+      try {
+        let res = await fetch(`${API_URL}?action=getArticle&barcode=${encodeURIComponent(code)}`);
+        let data = await res.json();
+        
+        if (data.info && data.info.name !== "Unbekannt") {
+          document.getElementById('pEk').value = data.info.ek_preis;
+          document.getElementById('pVk').value = data.info.vk_preis;
+          document.getElementById('priceForm').style.display = "block";
+          status.innerText = "Artikel: " + data.info.name;
+        } else {
+          status.innerText = "❌ Artikel nicht gefunden.";
+          document.getElementById('priceForm').style.display = "none";
+        }
+      } catch (err) {
+        status.innerText = "❌ Fehler beim Laden!";
+      }
+    }
+
+    async function savePrices() {
+      let code = document.getElementById('pBarcode').value.trim();
+      let ek = document.getElementById('pEk').value;
+      let vk = document.getElementById('pVk').value;
+      let status = document.getElementById('pStatus');
+
+      status.innerText = "Speichere Preise...";
+      try {
+        let res = await fetch(`${API_URL}?action=updatePrices&barcode=${encodeURIComponent(code)}&ek_preis=${ek}&vk_preis=${vk}`);
+        let data = await res.json();
+        if (data.status === "success") {
+          status.innerText = "✅ Preise erfolgreich aktualisiert!";
+        } else {
+          status.innerText = "❌ Fehler: " + data.message;
+        }
+      } catch (err) {
+        status.innerText = "❌ Fehler beim Speichern!";
+      }
+    }
+
+    async function executeRelocation() {
+      let code = document.getElementById('uBarcode').value.trim();
+      let von = document.getElementById('uVon').value.trim();
+      let nach = document.getElementById('uNach').value.trim();
+      let menge = document.getElementById('uMenge').value;
+      let status = document.getElementById('uStatus');
+
+      if (!code || !von || !nach || !menge) {
+        status.innerText = "Bitte alle Felder ausfüllen.";
+        return;
+      }
+
+      status.innerText = "Buche Um...";
+      try {
+        let res = await fetch(`${API_URL}?action=relocateStock&barcode=${encodeURIComponent(code)}&vonPlatz=${encodeURIComponent(von)}&nachPlatz=${encodeURIComponent(nach)}&menge=${menge}`);
+        let data = await res.json();
+        if (data.status === "success") {
+          status.innerText = "✅ Erfolgreich umgelagert!";
+          document.getElementById('uBarcode').value = "";
+          document.getElementById('uVon').value = "";
+          document.getElementById('uNach').value = "";
+          document.getElementById('uMenge').value = "1";
+        } else {
+          status.innerText = "❌ Fehler: " + data.message;
+        }
+      } catch (err) {
+        status.innerText = "❌ Fehler bei der Umbuchen!";
+      }
+    }
+  </script>
+</body>
+</html>
