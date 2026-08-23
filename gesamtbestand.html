@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lager Beta - Gesamtlagerbestand</title>
+  <style>
+    body { font-family: sans-serif; margin: 15px; background: #f4f6f8; }
+    nav { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+    nav a { text-decoration: none; color: #2563eb; font-weight: bold; }
+    nav a.active { color: #1e40af; border-bottom: 2px solid #2563eb; }
+    .card { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+    input[type="text"] { flex: 1; min-width: 200px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #2563eb; color: #fff; border: none; font-weight: bold; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #94a3b8; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #e2e8f0; padding: 10px; text-align: left; }
+    th { background: #f1f5f9; color: #334155; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .badge { padding: 3px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-empty { background: #fee2e2; color: #991b1b; }
+    .summary-box { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+    .summary-card { background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 6px; flex: 1; min-width: 150px; }
+    .summary-card div { font-size: 0.85em; color: #1e40af; }
+    .summary-card span { font-size: 1.3em; font-weight: bold; color: #1e3a8a; }
+    #status { margin-top: 10px; font-weight: bold; color: #475569; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Buchen (EK/VK)</a> |
+    <a href="artikel.html">Artikel & Druck</a> |
+    <a href="platz.html">Platzabfrage</a> |
+    <a href="gesamtbestand.html" class="active">Gesamtlagerbestand</a> |
+    <a href="bilanz.html">Bilanz</a> |
+    <a href="verwaltung.html">Verwaltung</a>
+  </nav>
+
+  <div class="card">
+    <h2>📋 Gesamtlagerbestand</h2>
+
+    <div class="summary-box">
+      <div class="summary-card">
+        <div>Anzahl Positionen</div>
+        <span id="totalItems">0</span>
+      </div>
+      <div class="summary-card">
+        <div>Gesamtmenge im Lager</div>
+        <span id="totalQuantity">0 Stk.</span>
+      </div>
+      <div class="summary-card">
+        <div>Gesamtwert (EK)</div>
+        <span id="totalValue">0.00 €</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="🔍 Suche nach Barcode, Name oder Lagerplatz..." onkeyup="filterTable()">
+      <button onclick="loadInventory()" id="refreshBtn">🔄 Aktualisieren</button>
+    </div>
+
+    <div id="status">Lade Lagerdaten...</div>
+
+    <table id="inventoryTable" style="display: none;">
+      <thead>
+        <tr>
+          <th>Barcode</th>
+          <th>Warenname</th>
+          <th>Lagerplatz</th>
+          <th>Menge</th>
+          <th>EK-Preis</th>
+          <th>VK-Preis</th>
+          <th>Gesamtwert (EK)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="inventoryBody">
+        <!-- Dynamische Befüllung -->
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyLtNLLS3hzOB8-94VkEUaYmGeYuHD9RLqFTmFEZfV8MIlXGt9s3nmmTaYrydmXiC3e/exec";
+    let fullInventory = [];
+
+    document.addEventListener("DOMContentLoaded", loadInventory);
+
+    async function loadInventory() {
+      const status = document.getElementById('status');
+      const btn = document.getElementById('refreshBtn');
+      const table = document.getElementById('inventoryTable');
+      
+      status.innerText = "⏳ Lade Bestandsdaten aus dem System...";
+      btn.disabled = true;
+      table.style.display = "none";
+
+      try {
+        // Da das Backend keine dedizierte Bestandsliste hat, laden wir die Artikel/Platz-Daten über vorhandene Aktionen
+        let res = await fetch(`${API_URL}?action=getInventoryData`);
+        let result = await res.json();
+
+        if (result.status === "success" && result.data) {
+          fullInventory = result.data;
+          renderTable(fullInventory);
+          status.innerText = "";
+          table.style.display = "table";
+        } else {
+          // Fallback, falls die Aktion 'getInventoryData' vom Backend abweicht: Abfrage über Platzabfrage/All-Action
+          await fallbackLoadInventory();
+        }
+      } catch (err) {
+        await fallbackLoadInventory();
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // Fallback: Kombiniert Artikel und Lagerplätze aus vorhandenen Einzel-Endpoints
+    async function fallbackLoadInventory() {
+      const status = document.getElementById('status');
+      const table = document.getElementById('inventoryTable');
+
+      try {
+        let res = await fetch(`${API_URL}?action=getAllArticles`);
+        let result = await res.json();
+
+        if (result.data && Array.isArray(result.data)) {
+          fullInventory = result.data;
+          renderTable(fullInventory);
+          status.innerText = "";
+          table.style.display = "table";
+        } else {
+          status.innerText = "❌ Keine Bestandsdaten empfangen oder ungültiges Format.";
+        }
+      } catch (e) {
+        status.innerText = "❌ Fehler beim Verbinden mit dem Backend!";
+      }
+    }
+
+    function renderTable(data) {
+      const body = document.getElementById('inventoryBody');
+      body.innerHTML = "";
+
+      let totalItems = 0;
+      let totalQty = 0;
+      let totalVal = 0;
+
+      data.forEach(item => {
+        let barcode = item.barcode || item[0] || "-";
+        let name = item.name || item[1] || "Unbekannt";
+        let platz = item.platz || item[2] || "Unbekannt";
+        let menge = Number(item.menge || item[3] || 0);
+        let ek = Number(item.ek_preis || item[4] || 0);
+        let vk = Number(item.vk_preis || item[5] || 0);
+
+        let rowVal = menge * ek;
+
+        totalItems++;
+        totalQty += menge;
+        totalVal += rowVal;
+
+        let tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${barcode}</code></td>
+          <td><b>${name}</b></td>
+          <td>${platz}</td>
+          <td><b>${menge}</b> Stk.</td>
+          <td>${ek.toFixed(2)} €</td>
+          <td>${vk.toFixed(2)} €</td>
+          <td>${rowVal.toFixed(2)} €</td>
+          <td>
+            ${menge > 0 
+              ? '<span class="badge badge-ok">Lagernd</span>' 
+              : '<span class="badge badge-empty">Leer</span>'}
+          </td>
+        `;
+        body.appendChild(tr);
+      });
+
+      document.getElementById('totalItems').innerText = totalItems;
+      document.getElementById('totalQuantity').innerText = totalQty + " Stk.";
+      document.getElementById('totalValue').innerText = totalVal.toFixed(2) + " €";
+    }
+
+    function filterTable() {
+      let query = document.getElementById('searchInput').value.toLowerCase();
+      let filtered = fullInventory.filter(item => {
+        let barcode = String(item.barcode || item[0] || "").toLowerCase();
+        let name = String(item.name || item[1] || "").toLowerCase();
+        let platz = String(item.platz || item[2] || "").toLowerCase();
+
+        return barcode.includes(query) || name.includes(query) || platz.includes(query);
+      });
+      renderTable(filtered);
+    }
+  </script>
+</body>
+</html>
